@@ -42,18 +42,22 @@ InsightResponse = Union[InsightResponseTriggered, InsightResponseNotTriggered]
 class InsightRequest(BaseModel):
     """Request model for insight generation."""
     user_question: str = Field(..., min_length=1, max_length=1000)
+    bv_name: Optional[str] = Field(None, description="Business View name to use for analysis")
 
     class Config:
         json_schema_extra = {
             "examples": [
                 {
-                    "user_question": "Why did revenue in APAC drop in the last 8 weeks vs previous period?"
+                    "user_question": "Why did revenue in APAC drop in the last 8 weeks vs previous period?",
+                    "bv_name": "E-commerce Sales Analysis"
                 },
                 {
-                    "user_question": "Show me anomalies in user signups for Q4 2024"
+                    "user_question": "Show me anomalies in user signups for Q4 2024",
+                    "bv_name": "E-commerce Sales Analysis"
                 },
                 {
-                    "user_question": "What caused the sales spike in Enterprise segment last month?"
+                    "user_question": "Detect anomalies in drug sales revenue for 2024",
+                    "bv_name": "Pharma Sales Analytics"
                 }
             ]
         }

@@ -15,6 +15,7 @@ import {
   getBusinessViews,
   refreshBusinessView,
   getBusinessViewData,
+  getFeedRuns,
 } from "./services/api";
 
 /**
@@ -234,7 +235,9 @@ function App() {
         {activeTab === "feeds" && (
           <IntelligentFeedPage
             triggeredAlerts={triggeredAlerts}
+            feeds={feeds}
             isLoading={alertsLoading}
+            onFetchFeedRuns={getFeedRuns}
           />
         )}
 

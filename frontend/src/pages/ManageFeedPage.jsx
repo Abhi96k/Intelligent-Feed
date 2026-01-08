@@ -10,16 +10,20 @@ function ManageFeedPage({ feeds, businessViews, onCreateFeed, onUpdateFeed, onDe
   const [editingFeed, setEditingFeed] = useState(null);
   const [validationResult, setValidationResult] = useState(null);
   const [isValidating, setIsValidating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   const handleOpenCreate = () => {
     setEditingFeed(null);
     setValidationResult(null);
+    setSaveSuccess(false);
     setIsDialogOpen(true);
   };
 
   const handleOpenEdit = (feed) => {
     setEditingFeed(feed);
     setValidationResult(null);
+    setSaveSuccess(false);
     setIsDialogOpen(true);
   };
 
@@ -27,26 +31,35 @@ function ManageFeedPage({ feeds, businessViews, onCreateFeed, onUpdateFeed, onDe
     setIsDialogOpen(false);
     setEditingFeed(null);
     setValidationResult(null);
+    setSaveSuccess(false);
   };
 
   const handleSave = async (formData) => {
     // Validate query first
     setIsValidating(true);
+    setSaveSuccess(false);
     try {
       const validation = await onValidateQuery(formData.user_query, formData.bv_name);
       setValidationResult(validation);
       
       if (validation.is_valid || validation.can_proceed) {
         // Save the feed
+        setIsSaving(true);
         if (editingFeed) {
           await onUpdateFeed({ ...editingFeed, ...formData });
         } else {
           await onCreateFeed(formData);
         }
-        handleClose();
+        setIsSaving(false);
+        setSaveSuccess(true);
+        // Auto-close dialog after successful save
+        setTimeout(() => {
+          handleClose();
+        }, 500);
       }
     } catch (error) {
       console.error('Validation/Save error:', error);
+      setIsSaving(false);
     } finally {
       setIsValidating(false);
     }
@@ -104,7 +117,7 @@ function ManageFeedPage({ feeds, businessViews, onCreateFeed, onUpdateFeed, onDe
           </button>
         </div>
       ) : (
-        <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -126,8 +139,8 @@ function ManageFeedPage({ feeds, businessViews, onCreateFeed, onUpdateFeed, onDe
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Last Run
                 </th>
-                <th className="relative px-6 py-3">
-                  <span className="sr-only">Actions</span>
+                <th className="sticky right-0 bg-gray-50 px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider shadow-[-4px_0_6px_-4px_rgba(0,0,0,0.1)]">
+                  Actions
                 </th>
               </tr>
             </thead>
@@ -163,16 +176,16 @@ function ManageFeedPage({ feeds, businessViews, onCreateFeed, onUpdateFeed, onDe
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {feed.last_run ? new Date(feed.last_run).toLocaleString() : 'Never'}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                  <td className="sticky right-0 bg-white px-6 py-4 whitespace-nowrap text-right text-sm font-medium shadow-[-4px_0_6px_-4px_rgba(0,0,0,0.1)]">
                     <button
                       onClick={() => handleOpenEdit(feed)}
-                      className="text-primary-600 hover:text-primary-900 mr-4"
+                      className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-primary-600 bg-primary-50 rounded-md hover:bg-primary-100 mr-2"
                     >
                       Edit
                     </button>
                     <button
                       onClick={() => handleDelete(feed)}
-                      className="text-error-600 hover:text-error-900"
+                      className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-error-600 bg-error-50 rounded-md hover:bg-error-100"
                     >
                       Delete
                     </button>
@@ -192,6 +205,9 @@ function ManageFeedPage({ feeds, businessViews, onCreateFeed, onUpdateFeed, onDe
         feed={editingFeed}
         businessViews={businessViews}
         validationResult={validationResult}
+        isValidating={isValidating}
+        isSaving={isSaving}
+        saveSuccess={saveSuccess}
       />
     </div>
   );

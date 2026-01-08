@@ -162,6 +162,19 @@ export const deleteFeed = async (feedId) => {
 };
 
 /**
+ * Get feed run history
+ * @param {string} feedId - Feed ID
+ * @param {number} limit - Number of runs to fetch
+ * @returns {Promise} List of run history entries
+ */
+export const getFeedRuns = async (feedId, limit = 10) => {
+  const response = await apiClient.get(`/feeds/${feedId}/runs`, {
+    params: { limit },
+  });
+  return response.data;
+};
+
+/**
  * Validate a query
  * @param {string} query - User query to validate
  * @param {string} bvName - Business view name

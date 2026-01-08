@@ -7,10 +7,12 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import uuid
+import json
 
 from app.models.response import InsightRequest, InsightResponse, HealthResponse, ErrorResponse
 from app.services.orchestrator import IntelligentFeedOrchestrator
 from app.utils.sample_business_view import SAMPLE_BUSINESS_VIEW
+from app.utils.pharma_business_view import PHARMA_BUSINESS_VIEW
 from app.core.config import settings
 from app.core.logging import setup_logging, get_logger
 
@@ -83,27 +85,68 @@ class TriggeredAlert(BaseModel):
     results: Dict[str, Any]
 
 
+class FeedRunHistory(BaseModel):
+    """Record of a feed run."""
+    id: str
+    feed_id: str
+    run_at: datetime
+    triggered: bool
+    alert_id: Optional[str] = None
+    metric: Optional[str] = None
+    trigger_reason: Optional[str] = None
+    error: Optional[str] = None
+
+
 # In-memory storage (replace with database in production)
 feeds_db: Dict[str, Feed] = {}
 triggered_alerts_db: Dict[str, TriggeredAlert] = {}
+feed_run_history_db: Dict[str, List[FeedRunHistory]] = {}  # feed_id -> list of runs
 
 # Setup logging
 setup_logging()
 logger = get_logger(__name__)
 
-# Global orchestrator instance
-orchestrator: IntelligentFeedOrchestrator = None
+# Global orchestrator instances for different BVs
+orchestrators: Dict[str, IntelligentFeedOrchestrator] = {}
+
+
+def get_orchestrator(bv_name: str = None) -> IntelligentFeedOrchestrator:
+    """Get orchestrator for the specified business view."""
+    if bv_name is None:
+        bv_name = "e-commerce"
+    
+    bv_name_lower = bv_name.lower()
+    
+    # Check if orchestrator already exists for this BV
+    if "pharma" in bv_name_lower:
+        key = "pharma"
+        if key not in orchestrators:
+            orchestrators[key] = IntelligentFeedOrchestrator(
+                business_view=PHARMA_BUSINESS_VIEW,
+                db_path="sqlite:///./tellius_feed.db",
+            )
+            logger.info("orchestrator_created", bv_name="pharma")
+        return orchestrators[key]
+    else:
+        key = "ecommerce"
+        if key not in orchestrators:
+            orchestrators[key] = IntelligentFeedOrchestrator(
+                business_view=SAMPLE_BUSINESS_VIEW,
+                db_path="sqlite:///./tellius_feed.db",
+            )
+            logger.info("orchestrator_created", bv_name="ecommerce")
+        return orchestrators[key]
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    global orchestrator
+    global orchestrators
 
     logger.info("application_starting", version=settings.VERSION)
 
-    # Initialize orchestrator
-    orchestrator = IntelligentFeedOrchestrator(
+    # Initialize default orchestrator (E-commerce)
+    orchestrators["ecommerce"] = IntelligentFeedOrchestrator(
         business_view=SAMPLE_BUSINESS_VIEW,
         db_path="sqlite:///./tellius_feed.db",
     )
@@ -114,8 +157,9 @@ async def lifespan(app: FastAPI):
 
     # Cleanup
     logger.info("application_shutting_down")
-    if orchestrator:
-        orchestrator.close()
+    for key, orch in orchestrators.items():
+        if orch:
+            orch.close()
     logger.info("application_stopped")
 
 
@@ -203,7 +247,10 @@ async def generate_insight(request: InsightRequest):
     - "What caused the sales spike in Enterprise segment last month?"
     """
     try:
-        logger.info("api_request_received", question=request.user_question)
+        # Get the appropriate orchestrator based on bv_name
+        orchestrator = get_orchestrator(request.bv_name)
+        
+        logger.info("api_request_received", question=request.user_question, bv_name=request.bv_name)
 
         # Generate insight
         result = await orchestrator.generate_insight(request.user_question)
@@ -370,17 +417,30 @@ async def delete_feed(feed_id: str):
         raise HTTPException(status_code=404, detail="Feed not found")
     
     del feeds_db[feed_id]
+    # Also clean up run history
+    if feed_id in feed_run_history_db:
+        del feed_run_history_db[feed_id]
     logger.info("feed_deleted", feed_id=feed_id)
     return {"message": "Feed deleted successfully"}
+
+
+@app.get("/api/feeds/{feed_id}/runs", response_model=List[FeedRunHistory], tags=["Feeds"])
+async def get_feed_runs(feed_id: str, limit: int = 10):
+    """Get run history for a feed."""
+    if feed_id not in feeds_db:
+        raise HTTPException(status_code=404, detail="Feed not found")
+    
+    runs = feed_run_history_db.get(feed_id, [])
+    return runs[:limit]
 
 
 @app.post("/api/feeds/validate", response_model=QueryValidationResult, tags=["Feeds"])
 async def validate_feed_query(validation: QueryValidation):
     """Validate a query using LLM to determine intent and suitability for ARIMA or Absolute detection."""
-    from anthropic import Anthropic
     
     try:
-        client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        # Use configured LLM provider
+        provider = settings.LLM_PROVIDER.lower()
         
         validation_prompt = f"""Analyze this user query for an analytics feed system and determine:
 1. Is it a valid analytics query that can be analyzed?
@@ -408,13 +468,24 @@ Respond in JSON format:
     "suggestions": ["suggestion1", "suggestion2"] // Only if is_valid is false
 }}"""
 
-        response = client.messages.create(
-            model=settings.ANTHROPIC_MODEL,
-            max_tokens=500,
-            messages=[{"role": "user", "content": validation_prompt}]
-        )
-        
-        response_text = response.content[0].text
+        if provider == "openai":
+            from openai import OpenAI
+            client = OpenAI(api_key=settings.OPENAI_API_KEY)
+            response = client.chat.completions.create(
+                model=settings.OPENAI_MODEL,
+                max_tokens=500,
+                messages=[{"role": "user", "content": validation_prompt}]
+            )
+            response_text = response.choices[0].message.content
+        else:
+            from anthropic import Anthropic
+            client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+            response = client.messages.create(
+                model=settings.ANTHROPIC_MODEL,
+                max_tokens=500,
+                messages=[{"role": "user", "content": validation_prompt}]
+            )
+            response_text = response.content[0].text
         # Extract JSON from response
         import re
         json_match = re.search(r'\{[\s\S]*\}', response_text)
@@ -463,12 +534,15 @@ async def get_triggered_alerts():
 @app.get("/api/business-views", tags=["Business Views"])
 async def list_business_views():
     """Get all business views."""
+    business_views = []
+    
+    # E-Commerce BV (from sample)
     bv = SAMPLE_BUSINESS_VIEW
+    bv_name_lower = bv.name.lower()
+    active_feeds = sum(1 for f in feeds_db.values() 
+                       if f.bv_name.lower() == bv_name_lower and f.is_active)
     
-    # Count active feeds for this BV
-    active_feeds = sum(1 for f in feeds_db.values() if f.bv_name == bv.name and f.is_active)
-    
-    return [{
+    business_views.append({
         "name": bv.name,
         "display_name": bv.name.replace("_", " ").title(),
         "description": bv.description or "E-Commerce analytics business view",
@@ -476,7 +550,23 @@ async def list_business_views():
         "measure_count": len(bv.measures),
         "active_feeds": active_feeds,
         "last_refresh": None,
-    }]
+    })
+    
+    # Pharma BV (from pharma_business_view)
+    pharma_bv = PHARMA_BUSINESS_VIEW
+    pharma_active_feeds = sum(1 for f in feeds_db.values() 
+                              if "pharma" in f.bv_name.lower() and f.is_active)
+    business_views.append({
+        "name": pharma_bv.name,
+        "display_name": pharma_bv.name,
+        "description": pharma_bv.description or "Pharmaceutical sales and prescription analytics",
+        "table_count": len(pharma_bv.tables),
+        "measure_count": len(pharma_bv.measures),
+        "active_feeds": pharma_active_feeds,
+        "last_refresh": None,
+    })
+    
+    return business_views
 
 
 @app.post("/api/business-views/{bv_name}/refresh", tags=["Business Views"])
@@ -487,20 +577,43 @@ async def refresh_business_view(bv_name: str):
     """
     logger.info("bv_refresh_started", bv_name=bv_name)
     
-    # Get all active feeds for this BV
-    active_feeds = [f for f in feeds_db.values() if f.bv_name == bv_name and f.is_active]
+    # Get all active feeds for this BV (case-insensitive match)
+    bv_name_lower = bv_name.lower().replace("-", " ").replace("_", " ")
+    active_feeds = [
+        f for f in feeds_db.values() 
+        if f.bv_name.lower().replace("-", " ").replace("_", " ") == bv_name_lower and f.is_active
+    ]
+    
+    logger.info("feeds_found_for_bv", bv_name=bv_name, feed_count=len(active_feeds), 
+                feed_names=[f.name for f in active_feeds])
     
     triggered_count = 0
     new_alerts = []
     
     for feed in active_feeds:
+        run_id = str(uuid.uuid4())
+        run_time = datetime.now()
+        
         try:
+            # Get the appropriate orchestrator for this feed's BV
+            feed_orchestrator = get_orchestrator(feed.bv_name)
+            
             # Run the analysis
-            result = await orchestrator.generate_insight(feed.user_query)
+            result = await feed_orchestrator.generate_insight(feed.user_query)
             
             # Update last_run
-            feed.last_run = datetime.now()
+            feed.last_run = run_time
             feeds_db[feed.id] = feed
+            
+            # Record run history
+            run_record = FeedRunHistory(
+                id=run_id,
+                feed_id=feed.id,
+                run_at=run_time,
+                triggered=result.triggered,
+                metric=result.metric,
+                trigger_reason=result.trigger_reason if result.triggered else None,
+            )
             
             # Check if triggered
             if result.triggered:
@@ -514,15 +627,32 @@ async def refresh_business_view(bv_name: str):
                     trigger_reason=result.trigger_reason,
                     severity=result.evidence.get("alert", {}).get("severity", "medium") if result.evidence else "medium",
                     confidence=result.confidence,
-                    triggered_at=datetime.now(),
+                    triggered_at=run_time,
                     results=result.model_dump(),
                 )
                 triggered_alerts_db[alert_id] = alert
                 new_alerts.append(alert)
                 triggered_count += 1
+                run_record.alert_id = alert_id
+            
+            # Store run history
+            if feed.id not in feed_run_history_db:
+                feed_run_history_db[feed.id] = []
+            feed_run_history_db[feed.id].insert(0, run_record)  # Most recent first
                 
         except Exception as e:
             logger.error("feed_analysis_error", feed_id=feed.id, error=str(e))
+            # Record failed run
+            run_record = FeedRunHistory(
+                id=run_id,
+                feed_id=feed.id,
+                run_at=run_time,
+                triggered=False,
+                error=str(e),
+            )
+            if feed.id not in feed_run_history_db:
+                feed_run_history_db[feed.id] = []
+            feed_run_history_db[feed.id].insert(0, run_record)
             continue
     
     logger.info("bv_refresh_completed", bv_name=bv_name, triggered_count=triggered_count)
@@ -561,8 +691,14 @@ async def get_business_view_data(bv_name: str, limit: int = 100):
         return obj
     
     try:
-        bv = SAMPLE_BUSINESS_VIEW
-        if bv.name != bv_name:
+        # Find the matching business view
+        bv = None
+        if SAMPLE_BUSINESS_VIEW.name.lower() == bv_name.lower() or "e-commerce" in bv_name.lower():
+            bv = SAMPLE_BUSINESS_VIEW
+        elif PHARMA_BUSINESS_VIEW.name.lower() == bv_name.lower() or "pharma" in bv_name.lower():
+            bv = PHARMA_BUSINESS_VIEW
+        
+        if bv is None:
             raise HTTPException(status_code=404, detail="Business view not found")
         
         db_path = "./tellius_feed.db"

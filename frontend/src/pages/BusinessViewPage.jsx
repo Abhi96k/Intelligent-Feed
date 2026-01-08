@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import SchemaVisualization from "../components/SchemaVisualization";
 
 /**
  * BusinessViewPage Component
@@ -14,6 +15,9 @@ function BusinessViewPage({
   const [selectedBV, setSelectedBV] = useState(null);
   const [selectedTable, setSelectedTable] = useState(null);
   const [isLoadingData, setIsLoadingData] = useState(false);
+  const [viewMode, setViewMode] = useState("table"); // "table" or "schema"
+  const [currentPage, setCurrentPage] = useState(1);
+  const rowsPerPage = 10;
 
   // Select first BV by default
   useEffect(() => {
@@ -30,15 +34,21 @@ function BusinessViewPage({
     }
   }, [selectedBV, onFetchBVData]);
 
-  // Select first table when data loads
+  // Select first table when data loads or when BV changes
   useEffect(() => {
     if (bvData?.tables) {
       const tableNames = Object.keys(bvData.tables);
-      if (tableNames.length > 0 && !selectedTable) {
+      // If no table selected OR selected table is not in current BV, select first
+      if (tableNames.length > 0 && (!selectedTable || !tableNames.includes(selectedTable))) {
         setSelectedTable(tableNames[0]);
       }
     }
   }, [bvData, selectedTable]);
+
+  // Reset page when table changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedTable]);
 
   const handleRefresh = async () => {
     if (selectedBV) {
@@ -47,6 +57,13 @@ function BusinessViewPage({
   };
 
   const currentTableData = bvData?.tables?.[selectedTable];
+  
+  // Pagination calculations
+  const totalRows = currentTableData?.data?.length || 0;
+  const totalPages = Math.ceil(totalRows / rowsPerPage);
+  const startIndex = (currentPage - 1) * rowsPerPage;
+  const endIndex = startIndex + rowsPerPage;
+  const paginatedData = currentTableData?.data?.slice(startIndex, endIndex) || [];
 
   return (
     <div className="flex min-h-[600px]">
@@ -103,7 +120,7 @@ function BusinessViewPage({
       <div className="flex-1 flex flex-col">
         {selectedBV ? (
           <>
-            {/* Header with Refresh Button */}
+            {/* Header with View Toggle and Refresh Button */}
             <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
               <div>
                 <h1 className="text-xl font-bold text-gray-900">
@@ -115,15 +132,47 @@ function BusinessViewPage({
                     ?.description || "View and analyze data"}
                 </p>
               </div>
-              <button
-                onClick={handleRefresh}
-                disabled={isRefreshing}
-                className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg ${
-                  isRefreshing
-                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                    : "text-white bg-primary-600 hover:bg-primary-700"
-                }`}
-              >
+              <div className="flex items-center space-x-4">
+                {/* View Mode Toggle */}
+                <div className="flex bg-gray-100 rounded-lg p-1">
+                  <button
+                    onClick={() => setViewMode("table")}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md flex items-center transition-colors ${
+                      viewMode === "table"
+                        ? "bg-white text-gray-900 shadow-sm"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
+                    <svg className="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    Table
+                  </button>
+                  <button
+                    onClick={() => setViewMode("schema")}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md flex items-center transition-colors ${
+                      viewMode === "schema"
+                        ? "bg-white text-gray-900 shadow-sm"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
+                    <svg className="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+                    </svg>
+                    Schema
+                  </button>
+                </div>
+                
+                {/* Refresh Button */}
+                <button
+                  onClick={handleRefresh}
+                  disabled={isRefreshing}
+                  className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg ${
+                    isRefreshing
+                      ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                      : "text-white bg-primary-600 hover:bg-primary-700"
+                  }`}
+                >
                 {isRefreshing ? (
                   <>
                     <svg
@@ -165,11 +214,19 @@ function BusinessViewPage({
                     Refresh & Analyze
                   </>
                 )}
-              </button>
+                </button>
+              </div>
             </div>
 
-            {/* Table Tabs */}
-            {bvData?.tables && (
+            {/* Schema Visualization Mode */}
+            {viewMode === "schema" && (
+              <div className="p-6">
+                <SchemaVisualization bvData={bvData} />
+              </div>
+            )}
+
+            {/* Table Tabs - Only show in table mode */}
+            {viewMode === "table" && bvData?.tables && (
               <div className="bg-gray-50 border-b border-gray-200 px-6">
                 <nav className="flex space-x-4 overflow-x-auto py-2">
                   {Object.keys(bvData.tables).map((tableName) => (
@@ -192,7 +249,8 @@ function BusinessViewPage({
               </div>
             )}
 
-            {/* Data Table */}
+            {/* Data Table - Only show in table mode */}
+            {viewMode === "table" && (
             <div className="p-6">
               {isLoadingData ? (
                 <div className="flex items-center justify-center h-64">
@@ -236,7 +294,7 @@ function BusinessViewPage({
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {currentTableData.data.map((row, rowIdx) => (
+                        {paginatedData.map((row, rowIdx) => (
                           <tr
                             key={rowIdx}
                             className="hover:bg-gray-50 transition-colors"
@@ -254,9 +312,49 @@ function BusinessViewPage({
                       </tbody>
                     </table>
                   </div>
-                  <div className="bg-gray-50 px-4 py-3 border-t border-gray-200 text-sm text-gray-500">
-                    Showing {currentTableData.row_count} of{" "}
-                    {currentTableData.total_rows} rows
+                  
+                  {/* Pagination Controls */}
+                  <div className="bg-gray-50 px-4 py-3 border-t border-gray-200 flex items-center justify-between">
+                    <div className="text-sm text-gray-500">
+                      Showing {startIndex + 1} - {Math.min(endIndex, totalRows)} of {totalRows} rows
+                      <span className="text-gray-400 ml-2">
+                        (Total in DB: {currentTableData.total_rows})
+                      </span>
+                    </div>
+                    
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => setCurrentPage(1)}
+                        disabled={currentPage === 1}
+                        className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        First
+                      </button>
+                      <button
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                        className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        ←
+                      </button>
+                      <span className="text-sm text-gray-700">
+                        Page {currentPage} of {totalPages}
+                      </span>
+                      <button
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                        className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        →
+                      </button>
+                      <button
+                        onClick={() => setCurrentPage(totalPages)}
+                        disabled={currentPage === totalPages}
+                        className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Last
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -355,6 +453,7 @@ function BusinessViewPage({
                 </div>
               )}
             </div>
+            )}
           </>
         ) : (
           <div className="flex items-center justify-center h-full">

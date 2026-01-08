@@ -3,7 +3,6 @@
 import json
 from datetime import datetime, timedelta
 from typing import Dict, Any
-from anthropic import Anthropic
 from app.models.intent import ParsedIntent, TimeRange, BaselineConfig, FeedType, BaselineType
 from app.services.bv_context_builder import BVContext
 from app.core.config import settings
@@ -13,11 +12,22 @@ logger = get_logger(__name__)
 
 
 class QuestionParser:
-    """Parses natural language questions into structured intents."""
+    """Parses natural language questions into structured intents.
+    
+    Supports both OpenAI and Anthropic providers.
+    """
 
     def __init__(self):
-        self.client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        self.model = settings.ANTHROPIC_MODEL
+        self.provider = settings.LLM_PROVIDER.lower()
+        
+        if self.provider == "openai":
+            from openai import OpenAI
+            self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+            self.model = settings.OPENAI_MODEL
+        else:
+            from anthropic import Anthropic
+            self.client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+            self.model = settings.ANTHROPIC_MODEL
 
     async def parse(self, user_question: str, bv_context: BVContext) -> ParsedIntent:
         """
@@ -30,23 +40,28 @@ class QuestionParser:
         Returns:
             ParsedIntent object
         """
-        logger.info("parsing_question", question=user_question)
+        logger.info("parsing_question", question=user_question, provider=self.provider)
 
         # Build prompt for LLM
         prompt = self._build_prompt(user_question, bv_context)
 
-        # Call LLM
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=settings.ANTHROPIC_MAX_TOKENS,
-            temperature=settings.ANTHROPIC_TEMPERATURE,
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
-
-        # Extract JSON from response
-        response_text = response.content[0].text
+        # Call LLM based on provider
+        if self.provider == "openai":
+            response = self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=settings.OPENAI_MAX_TOKENS,
+                temperature=settings.OPENAI_TEMPERATURE,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            response_text = response.choices[0].message.content
+        else:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=settings.ANTHROPIC_MAX_TOKENS,
+                temperature=settings.ANTHROPIC_TEMPERATURE,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            response_text = response.content[0].text
         logger.debug("llm_response", response=response_text)
 
         # Parse JSON

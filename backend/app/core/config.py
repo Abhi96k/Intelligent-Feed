@@ -13,11 +13,20 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     VERSION: str = "1.0.0"
 
-    # Anthropic API
-    ANTHROPIC_API_KEY: str
+    # LLM Provider (anthropic or openai)
+    LLM_PROVIDER: str = "openai"  # or "anthropic"
+    
+    # Anthropic API (optional if using OpenAI)
+    ANTHROPIC_API_KEY: Optional[str] = None
     ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
     ANTHROPIC_MAX_TOKENS: int = 4096
     ANTHROPIC_TEMPERATURE: float = 0.0
+    
+    # OpenAI API (optional if using Anthropic)
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_MODEL: str = "gpt-4o"
+    OPENAI_MAX_TOKENS: int = 4096
+    OPENAI_TEMPERATURE: float = 0.0
 
     # Database
     DATABASE_URL: str = "sqlite:///./tellius_feed.db"
@@ -28,7 +37,7 @@ class Settings(BaseSettings):
 
     # Detection Thresholds
     DEFAULT_ABSOLUTE_THRESHOLD: float = 5.0  # percentage
-    DEFAULT_ARIMA_SENSITIVITY: float = 3.0  # sigma multiplier
+    DEFAULT_ARIMA_SENSITIVITY: float = 2.0  # sigma multiplier (lower = more sensitive)
 
     # Query Limits
     MAX_QUERY_ROWS: int = 1000000

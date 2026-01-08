@@ -8,8 +8,12 @@ import DriverImpactChart from '../components/DriverImpactChart';
  * IntelligentFeedPage Component
  * Main page showing triggered alerts from feeds
  */
-function IntelligentFeedPage({ triggeredAlerts, onViewDetails }) {
+function IntelligentFeedPage({ triggeredAlerts, feeds, onViewDetails, onFetchFeedRuns }) {
   const [selectedAlert, setSelectedAlert] = useState(null);
+  const [expandedRuns, setExpandedRuns] = useState({});
+  const [feedRuns, setFeedRuns] = useState({});
+  const [loadingRuns, setLoadingRuns] = useState({});
+  const [sqlExpanded, setSqlExpanded] = useState(false);
 
   const handleAlertClick = (alert) => {
     setSelectedAlert(alert);
@@ -178,30 +182,69 @@ function IntelligentFeedPage({ triggeredAlerts, onViewDetails }) {
             )}
           </div>
 
-          {/* SQL Queries */}
+          {/* SQL Queries - Collapsible */}
           {results.evidence?.llm_generated_sql && (
-            <div className="card">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">LLM-Generated SQL</h3>
-              <div className="space-y-4">
-                {Object.entries(results.evidence.llm_generated_sql).map(([key, sql]) =>
-                  sql && (
-                    <div key={key} className="bg-gray-50 rounded-lg p-4">
-                      <h4 className="text-sm font-medium text-gray-700 mb-2 capitalize">
-                        {key.replace(/_/g, ' ')}
-                      </h4>
-                      <pre className="text-xs text-gray-600 overflow-x-auto whitespace-pre-wrap font-mono bg-gray-100 p-3 rounded">
-                        {sql}
-                      </pre>
-                    </div>
-                  )
-                )}
-              </div>
+            <div className="card overflow-hidden">
+              <button
+                onClick={() => setSqlExpanded(!sqlExpanded)}
+                className="w-full flex items-center justify-between text-left px-0 py-0"
+              >
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+                  <svg className="h-5 w-5 mr-2 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                  </svg>
+                  LLM-Generated SQL
+                </h3>
+                <svg className={`h-5 w-5 text-gray-500 transition-transform ${sqlExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              
+              {sqlExpanded && (
+                <div className="mt-4 space-y-4">
+                  {Object.entries(results.evidence.llm_generated_sql).map(([key, sql]) =>
+                    sql && (
+                      <div key={key} className="bg-gray-50 rounded-lg p-4">
+                        <h4 className="text-sm font-medium text-gray-700 mb-2 capitalize">
+                          {key.replace(/_/g, ' ')}
+                        </h4>
+                        <pre className="text-xs text-gray-600 overflow-x-auto whitespace-pre-wrap font-mono bg-gray-100 p-3 rounded">
+                          {sql}
+                        </pre>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
     );
   }
+
+  // Load run history for a feed
+  const handleLoadRuns = async (feedId, e) => {
+    e.stopPropagation();
+    
+    if (expandedRuns[feedId]) {
+      setExpandedRuns(prev => ({ ...prev, [feedId]: false }));
+      return;
+    }
+    
+    setLoadingRuns(prev => ({ ...prev, [feedId]: true }));
+    try {
+      if (onFetchFeedRuns) {
+        const runs = await onFetchFeedRuns(feedId);
+        setFeedRuns(prev => ({ ...prev, [feedId]: runs }));
+      }
+      setExpandedRuns(prev => ({ ...prev, [feedId]: true }));
+    } catch (error) {
+      console.error('Error loading runs:', error);
+    } finally {
+      setLoadingRuns(prev => ({ ...prev, [feedId]: false }));
+    }
+  };
 
   // List View
   return (
@@ -230,53 +273,107 @@ function IntelligentFeedPage({ triggeredAlerts, onViewDetails }) {
           {triggeredAlerts.map((alert) => (
             <div
               key={alert.id}
-              onClick={() => handleAlertClick(alert)}
-              className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 cursor-pointer hover:shadow-md hover:border-primary-300 transition-all"
+              className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
             >
-              <div className="flex items-start justify-between">
-                <div className="flex items-start space-x-4">
-                  {/* Alert Icon */}
-                  <div className={`flex-shrink-0 p-3 rounded-lg ${
-                    alert.severity === 'critical' ? 'bg-error-100' :
-                    alert.severity === 'high' ? 'bg-warning-100' :
-                    'bg-primary-100'
-                  }`}>
-                    <svg className={`h-6 w-6 ${
-                      alert.severity === 'critical' ? 'text-error-600' :
-                      alert.severity === 'high' ? 'text-warning-600' :
-                      'text-primary-600'
-                    }`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                    </svg>
+              {/* Main Alert Card */}
+              <div
+                onClick={() => handleAlertClick(alert)}
+                className="p-6 cursor-pointer hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-start space-x-4">
+                    {/* Alert Icon */}
+                    <div className={`flex-shrink-0 p-3 rounded-lg ${
+                      alert.severity === 'critical' ? 'bg-error-100' :
+                      alert.severity === 'high' ? 'bg-warning-100' :
+                      'bg-primary-100'
+                    }`}>
+                      <svg className={`h-6 w-6 ${
+                        alert.severity === 'critical' ? 'text-error-600' :
+                        alert.severity === 'high' ? 'text-warning-600' :
+                        'text-primary-600'
+                      }`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                    </div>
+
+                    {/* Alert Content */}
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <h3 className="text-lg font-semibold text-gray-900">{alert.feed_name}</h3>
+                        <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${
+                          alert.severity === 'critical' ? 'bg-error-100 text-error-800' :
+                          alert.severity === 'high' ? 'bg-warning-100 text-warning-800' :
+                          'bg-primary-100 text-primary-800'
+                        }`}>
+                          {alert.severity?.toUpperCase() || 'MEDIUM'}
+                        </span>
+                        <span className="text-xs text-gray-400">Latest Run</span>
+                      </div>
+                      <p className="mt-1 text-sm text-gray-600">{alert.trigger_reason}</p>
+                      <div className="mt-2 flex items-center space-x-4 text-sm text-gray-500">
+                        <span>Metric: {alert.metric}</span>
+                        <span>•</span>
+                        <span>Confidence: {alert.confidence?.toFixed(1)}%</span>
+                        <span>•</span>
+                        <span>{new Date(alert.triggered_at).toLocaleString()}</span>
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Alert Content */}
-                  <div>
-                    <div className="flex items-center space-x-2">
-                      <h3 className="text-lg font-semibold text-gray-900">{alert.feed_name}</h3>
-                      <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${
-                        alert.severity === 'critical' ? 'bg-error-100 text-error-800' :
-                        alert.severity === 'high' ? 'bg-warning-100 text-warning-800' :
-                        'bg-primary-100 text-primary-800'
-                      }`}>
-                        {alert.severity?.toUpperCase() || 'MEDIUM'}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-sm text-gray-600">{alert.trigger_reason}</p>
-                    <div className="mt-2 flex items-center space-x-4 text-sm text-gray-500">
-                      <span>Metric: {alert.metric}</span>
-                      <span>•</span>
-                      <span>Confidence: {alert.confidence?.toFixed(1)}%</span>
-                      <span>•</span>
-                      <span>{new Date(alert.triggered_at).toLocaleString()}</span>
-                    </div>
-                  </div>
+                  {/* Arrow */}
+                  <svg className="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
                 </div>
+              </div>
 
-                {/* Arrow */}
-                <svg className="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
+              {/* Load More Button & Run History */}
+              <div className="border-t border-gray-100 px-6 py-3 bg-gray-50">
+                <button
+                  onClick={(e) => handleLoadRuns(alert.feed_id, e)}
+                  className="text-sm text-primary-600 hover:text-primary-800 font-medium flex items-center"
+                >
+                  {loadingRuns[alert.feed_id] ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Loading...
+                    </>
+                  ) : (
+                    <>
+                      <svg className={`h-4 w-4 mr-2 transition-transform ${expandedRuns[alert.feed_id] ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                      {expandedRuns[alert.feed_id] ? 'Hide Run History' : 'Show Run History'}
+                    </>
+                  )}
+                </button>
+
+                {/* Run History List */}
+                {expandedRuns[alert.feed_id] && feedRuns[alert.feed_id] && (
+                  <div className="mt-3 space-y-2">
+                    {feedRuns[alert.feed_id].length === 0 ? (
+                      <p className="text-sm text-gray-500">No previous runs</p>
+                    ) : (
+                      feedRuns[alert.feed_id].map((run) => (
+                        <div key={run.id} className="flex items-center justify-between text-sm py-2 border-b border-gray-100 last:border-0">
+                          <div className="flex items-center space-x-3">
+                            <span className={`inline-flex h-2 w-2 rounded-full ${run.triggered ? 'bg-warning-500' : run.error ? 'bg-error-500' : 'bg-success-500'}`} />
+                            <span className="text-gray-600">
+                              {new Date(run.run_at).toLocaleString()}
+                            </span>
+                          </div>
+                          <span className={`text-xs ${run.triggered ? 'text-warning-600' : run.error ? 'text-error-600' : 'text-success-600'}`}>
+                            {run.triggered ? 'Triggered' : run.error ? 'Error' : 'No Alert'}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           ))}

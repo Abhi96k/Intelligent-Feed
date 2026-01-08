@@ -80,6 +80,13 @@ class ThresholdConfig(BaseModel):
     
     def to_human_readable(self) -> str:
         """Convert threshold to human-readable string."""
+        # For CHANGE operators, the prefix is already in the operator name
+        if self.operator == ComparisonOperator.CHANGE_GREATER_THAN:
+            return f"|change| > {self.value:,.0f}"
+        elif self.operator == ComparisonOperator.CHANGE_LESS_THAN:
+            return f"|change| < {self.value:,.0f}"
+        
+        # For other operators, include the compare_to prefix
         op_map = {
             ComparisonOperator.GREATER_THAN: ">",
             ComparisonOperator.LESS_THAN: "<",
@@ -87,10 +94,8 @@ class ThresholdConfig(BaseModel):
             ComparisonOperator.LESS_THAN_EQUAL: "<=",
             ComparisonOperator.EQUAL: "==",
             ComparisonOperator.NOT_EQUAL: "!=",
-            ComparisonOperator.CHANGE_GREATER_THAN: "change >",
-            ComparisonOperator.CHANGE_LESS_THAN: "change <",
         }
-        return f"{self.compare_to} {op_map.get(self.operator, '?')} {self.value}"
+        return f"{self.compare_to} {op_map.get(self.operator, '?')} {self.value:,.0f}"
 
 
 class BaselineType(str, Enum):

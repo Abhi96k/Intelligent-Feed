@@ -4,7 +4,17 @@ import { useState, useEffect } from 'react';
  * FeedDialog Component
  * Modal dialog for creating/editing feeds
  */
-function FeedDialog({ isOpen, onClose, onSave, feed = null, businessViews = [], validationResult = null }) {
+function FeedDialog({ 
+  isOpen, 
+  onClose, 
+  onSave, 
+  feed = null, 
+  businessViews = [], 
+  validationResult = null,
+  isValidating = false,
+  isSaving = false,
+  saveSuccess = false,
+}) {
   const [formData, setFormData] = useState({
     name: '',
     bv_name: '',
@@ -303,20 +313,63 @@ function FeedDialog({ isOpen, onClose, onSave, feed = null, businessViews = [], 
               </div>
             </div>
 
+            {/* Success Message */}
+            {saveSuccess && (
+              <div className="px-6 py-3 bg-success-50 border-t border-success-100">
+                <div className="flex items-center text-success-700">
+                  <svg className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span className="text-sm font-medium">Feed saved successfully!</span>
+                </div>
+              </div>
+            )}
+
             {/* Footer */}
             <div className="px-6 py-4 bg-gray-50 flex justify-end space-x-3">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+                disabled={isSaving}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 text-sm font-medium text-white bg-primary-600 border border-transparent rounded-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+                disabled={isValidating || isSaving || saveSuccess}
+                className={`px-4 py-2 text-sm font-medium text-white border border-transparent rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 ${
+                  saveSuccess 
+                    ? 'bg-success-600 hover:bg-success-700'
+                    : 'bg-primary-600 hover:bg-primary-700'
+                } disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center`}
               >
-                {feed ? 'Save Changes' : 'Create Feed'}
+                {isValidating ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Validating...
+                  </>
+                ) : isSaving ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Saving...
+                  </>
+                ) : saveSuccess ? (
+                  <>
+                    <svg className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Saved!
+                  </>
+                ) : (
+                  feed ? 'Save Changes' : 'Create Feed'
+                )}
               </button>
             </div>
           </form>

@@ -3,7 +3,6 @@
 import json
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple
-from anthropic import Anthropic
 from app.models.plan import TQLPlan, PlanMetadata
 from app.models.intent import ParsedIntent, TimeRange, BaselineConfig, FeedType, BaselineType, ThresholdConfig, ComparisonOperator
 from app.services.bv_context_builder import BVContext
@@ -34,11 +33,23 @@ class LLMSQLGenerator:
     This replaces the two-step process (QuestionParser -> TQLPlanner)
     with a single LLM call that generates both the structured intent
     and the SQL queries.
+    
+    Supports both OpenAI and Anthropic providers.
     """
 
     def __init__(self):
-        self.client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        self.model = settings.ANTHROPIC_MODEL
+        self.provider = settings.LLM_PROVIDER.lower()
+        
+        if self.provider == "openai":
+            from openai import OpenAI
+            self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+            self.model = settings.OPENAI_MODEL
+            logger.info("llm_provider_initialized", provider="openai", model=self.model)
+        else:
+            from anthropic import Anthropic
+            self.client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+            self.model = settings.ANTHROPIC_MODEL
+            logger.info("llm_provider_initialized", provider="anthropic", model=self.model)
 
     async def generate(
         self, user_question: str, bv_context: BVContext
@@ -53,21 +64,29 @@ class LLMSQLGenerator:
         Returns:
             LLMSQLGeneratorResponse with TQL plan and parsed intent
         """
-        logger.info("llm_sql_generation_started", question=user_question)
+        logger.info("llm_sql_generation_started", question=user_question, provider=self.provider)
 
         # Build prompt for LLM
         prompt = self._build_prompt(user_question, bv_context)
 
-        # Call LLM
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=settings.ANTHROPIC_MAX_TOKENS,
-            temperature=settings.ANTHROPIC_TEMPERATURE,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        # Call LLM based on provider
+        if self.provider == "openai":
+            response = self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=settings.OPENAI_MAX_TOKENS,
+                temperature=settings.OPENAI_TEMPERATURE,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            response_text = response.choices[0].message.content
+        else:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=settings.ANTHROPIC_MAX_TOKENS,
+                temperature=settings.ANTHROPIC_TEMPERATURE,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            response_text = response.content[0].text
 
-        # Extract JSON from response
-        response_text = response.content[0].text
         logger.debug("llm_sql_response", response=response_text[:500])
 
         # Parse JSON
@@ -288,8 +307,8 @@ Return only the JSON, no additional text.
             estimated_rows=1000,
             complexity_score=self._calculate_complexity(sql),
             uses_joins=True,
-            uses_aggregation=True,
-            uses_window_functions=False,
+                uses_aggregation=True,
+                uses_window_functions=False,
         )
 
         return TQLPlan(

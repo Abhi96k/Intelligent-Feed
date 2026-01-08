@@ -1,7 +1,6 @@
 """Narrative Generator - Create human-readable insight narratives using LLM."""
 
 import json
-from anthropic import Anthropic
 from app.models.detection import DetectionResult
 from app.models.insight import DeepInsight, Driver
 from app.models.intent import ParsedIntent
@@ -17,11 +16,21 @@ class NarrativeGenerator:
 
     The LLM is given computed evidence and generates explanations,
     but does NOT compute any metrics itself.
+    
+    Supports both OpenAI and Anthropic providers.
     """
 
     def __init__(self):
-        self.client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        self.model = settings.ANTHROPIC_MODEL
+        self.provider = settings.LLM_PROVIDER.lower()
+        
+        if self.provider == "openai":
+            from openai import OpenAI
+            self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+            self.model = settings.OPENAI_MODEL
+        else:
+            from anthropic import Anthropic
+            self.client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+            self.model = settings.ANTHROPIC_MODEL
 
     async def generate(
         self,
@@ -40,23 +49,28 @@ class NarrativeGenerator:
         Returns:
             Tuple of (what_happened, why_happened)
         """
-        logger.info("generating_narrative", metric=intent.metric)
+        logger.info("generating_narrative", metric=intent.metric, provider=self.provider)
 
         # Build prompt with computed evidence
         prompt = self._build_prompt(detection_result, deep_insight, intent)
 
-        # Call LLM
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=settings.ANTHROPIC_MAX_TOKENS,
-            temperature=0.3,  # Slightly higher for narrative generation
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
-
-        # Extract narrative from response
-        response_text = response.content[0].text
+        # Call LLM based on provider
+        if self.provider == "openai":
+            response = self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=settings.OPENAI_MAX_TOKENS,
+                temperature=0.3,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            response_text = response.choices[0].message.content
+        else:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=settings.ANTHROPIC_MAX_TOKENS,
+                temperature=0.3,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            response_text = response.content[0].text
         logger.debug("llm_narrative_response", response=response_text)
 
         # Parse JSON response
