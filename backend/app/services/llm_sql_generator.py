@@ -161,7 +161,12 @@ Generate SQL queries to answer this question. You MUST generate:
 3. Use the date_dim.date column for time filtering with format 'YYYY-MM-DD'
 4. For aggregated metrics, alias the result as 'metric_value'
 5. For time-series, alias date as 'date' and metric as 'value'
-6. For dimensional breakdowns, include dimension columns with their names as aliases and metric_value
+6. **CRITICAL for dimensional breakdowns**: 
+   - Break down by ONLY ONE dimension at a time (e.g., just region OR just category, NOT both)
+   - Choose the most relevant dimension for the question (e.g., region for geographic questions, category for product questions)
+   - If no specific dimension is mentioned, use 'region' as the default
+   - Format: SELECT dimension_column AS dimension_name, SUM(metric) AS metric_value FROM ... GROUP BY dimension_column
+   - Example: SELECT region_dim.region_name AS region, SUM(sales_fact.revenue) AS metric_value FROM ... GROUP BY region_dim.region_name
 
 ## Response Format
 Return ONLY valid JSON:

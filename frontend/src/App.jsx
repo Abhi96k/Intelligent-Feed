@@ -86,11 +86,19 @@ function App() {
         const topDrivers = results.evidence.drivers.slice(0, 3);
         topDrivers.forEach((driver) => {
           // Backend returns: dimension, member, impact, contribution_current, contribution_baseline, shift, value_current, value_baseline
-          const driverName = driver.member || driver.dimension_value || driver.name || "Unknown";
-          const contributionPct = driver.contribution_current || driver.contribution_pct || 0;
-          const impactValue = driver.impact || driver.impact_score || driver.shift || 0;
-          const direction = driver.shift > 0 ? "increase" : driver.shift < 0 ? "decrease" : "neutral";
-          
+          const driverName =
+            driver.member || driver.dimension_value || driver.name || "Unknown";
+          const contributionPct =
+            driver.contribution_current || driver.contribution_pct || 0;
+          const impactValue =
+            driver.impact || driver.impact_score || driver.shift || 0;
+          const direction =
+            driver.shift > 0
+              ? "increase"
+              : driver.shift < 0
+              ? "decrease"
+              : "neutral";
+
           insights.push({
             insight_type: "driver",
             triggered: true,
@@ -158,14 +166,18 @@ function App() {
 
   // Get driver data for chart
   const getDriverData = () => {
-    if (!results?.evidence?.drivers || results.evidence.drivers.length === 0) return null;
+    if (!results?.evidence?.drivers || results.evidence.drivers.length === 0)
+      return null;
 
     return {
       drivers: results.evidence.drivers.map((d, index) => ({
         // Backend returns: dimension, member, impact, contribution_current, shift, value_current, value_baseline
-        driver_name: d.member || d.dimension_value || d.name || `Driver ${index + 1}`,
-        impact_score: d.contribution_current || d.contribution_pct || d.impact_score || 0,
-        direction: d.shift > 0 ? "positive" : d.shift < 0 ? "negative" : "neutral",
+        driver_name:
+          d.member || d.dimension_value || d.name || `Driver ${index + 1}`,
+        impact_score:
+          d.contribution_current || d.contribution_pct || d.impact_score || 0,
+        direction:
+          d.shift > 0 ? "positive" : d.shift < 0 ? "negative" : "neutral",
         isPrimary: index === 0,
       })),
       primary_driver:
