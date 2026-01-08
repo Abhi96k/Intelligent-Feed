@@ -12,6 +12,87 @@ class FeedType(str, Enum):
     ARIMA = "arima"
 
 
+class ComparisonOperator(str, Enum):
+    """Comparison operators for threshold evaluation."""
+    GREATER_THAN = "greater_than"           # >
+    LESS_THAN = "less_than"                 # <
+    GREATER_THAN_EQUAL = "greater_than_equal"  # >=
+    LESS_THAN_EQUAL = "less_than_equal"     # <=
+    EQUAL = "equal"                         # ==
+    NOT_EQUAL = "not_equal"                 # !=
+    CHANGE_GREATER_THAN = "change_greater_than"  # |current - baseline| > value
+    CHANGE_LESS_THAN = "change_less_than"   # |current - baseline| < value
+
+
+class ThresholdConfig(BaseModel):
+    """Configuration for threshold-based alerting."""
+    operator: ComparisonOperator = ComparisonOperator.GREATER_THAN
+    value: float
+    compare_to: str = "current"  # "current", "baseline", "change", "percent_change"
+    
+    def evaluate(self, current_value: float, baseline_value: float = None) -> bool:
+        """
+        Evaluate if threshold condition is met.
+        
+        Args:
+            current_value: Current period metric value
+            baseline_value: Baseline period metric value (optional)
+            
+        Returns:
+            True if condition is met (should trigger), False otherwise
+        """
+        # Determine which value to compare
+        if self.compare_to == "current":
+            compare_value = current_value
+        elif self.compare_to == "baseline":
+            compare_value = baseline_value if baseline_value is not None else 0
+        elif self.compare_to == "change":
+            compare_value = abs(current_value - (baseline_value or 0))
+        elif self.compare_to == "percent_change":
+            if baseline_value and baseline_value != 0:
+                compare_value = abs((current_value - baseline_value) / baseline_value * 100)
+            else:
+                compare_value = 0
+        else:
+            compare_value = current_value
+        
+        # Apply operator
+        if self.operator == ComparisonOperator.GREATER_THAN:
+            return compare_value > self.value
+        elif self.operator == ComparisonOperator.LESS_THAN:
+            return compare_value < self.value
+        elif self.operator == ComparisonOperator.GREATER_THAN_EQUAL:
+            return compare_value >= self.value
+        elif self.operator == ComparisonOperator.LESS_THAN_EQUAL:
+            return compare_value <= self.value
+        elif self.operator == ComparisonOperator.EQUAL:
+            return compare_value == self.value
+        elif self.operator == ComparisonOperator.NOT_EQUAL:
+            return compare_value != self.value
+        elif self.operator == ComparisonOperator.CHANGE_GREATER_THAN:
+            change = abs(current_value - (baseline_value or 0))
+            return change > self.value
+        elif self.operator == ComparisonOperator.CHANGE_LESS_THAN:
+            change = abs(current_value - (baseline_value or 0))
+            return change < self.value
+        
+        return False
+    
+    def to_human_readable(self) -> str:
+        """Convert threshold to human-readable string."""
+        op_map = {
+            ComparisonOperator.GREATER_THAN: ">",
+            ComparisonOperator.LESS_THAN: "<",
+            ComparisonOperator.GREATER_THAN_EQUAL: ">=",
+            ComparisonOperator.LESS_THAN_EQUAL: "<=",
+            ComparisonOperator.EQUAL: "==",
+            ComparisonOperator.NOT_EQUAL: "!=",
+            ComparisonOperator.CHANGE_GREATER_THAN: "change >",
+            ComparisonOperator.CHANGE_LESS_THAN: "change <",
+        }
+        return f"{self.compare_to} {op_map.get(self.operator, '?')} {self.value}"
+
+
 class BaselineType(str, Enum):
     """Type of baseline comparison."""
     PREVIOUS_PERIOD = "previous_period"
@@ -102,7 +183,8 @@ class ParsedIntent(BaseModel):
     filters: Dict[str, Union[str, List[str]]] = Field(default_factory=dict)
     baseline: Optional[BaselineConfig] = None
     feed_type: FeedType = FeedType.ABSOLUTE
-    threshold: Optional[float] = None  # Override default threshold
+    threshold: Optional[float] = None  # Legacy: simple threshold value
+    threshold_config: Optional[ThresholdConfig] = None  # New: value-based threshold with operator
 
     def has_filters(self) -> bool:
         """Check if any filters are specified."""

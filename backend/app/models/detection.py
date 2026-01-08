@@ -1,6 +1,6 @@
 """Detection result models - outputs from detection engines."""
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from datetime import date
 from pydantic import BaseModel, Field
 from .intent import FeedType
@@ -28,7 +28,7 @@ class DetectionResult(BaseModel):
     triggered: bool
     trigger_reason: str
     feed_type: FeedType
-    metrics: Dict[str, float] = Field(default_factory=dict)
+    metrics: Dict[str, Any] = Field(default_factory=dict)  # Changed to Any to support various value types
 
     # For ARIMA detection
     anomaly_points: Optional[List[AnomalyPoint]] = None
@@ -39,7 +39,7 @@ class DetectionResult(BaseModel):
     baseline_value: Optional[float] = None
     absolute_delta: Optional[float] = None
     percent_change: Optional[float] = None
-    threshold_used: Optional[float] = None
+    threshold_used: Optional[Union[float, str]] = None  # Can be float (legacy) or string (new format like "current > 1000000")
 
     def is_arima(self) -> bool:
         """Check if this is ARIMA detection result."""

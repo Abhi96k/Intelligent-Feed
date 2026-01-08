@@ -70,7 +70,9 @@ function DriverImpactChart({ data }) {
   // Custom label for bars
   const CustomLabel = (props) => {
     const { x, y, width, height, value, payload } = props
-    const radius = 10
+    
+    // Guard against undefined payload
+    if (!payload) return null
 
     return (
       <g>

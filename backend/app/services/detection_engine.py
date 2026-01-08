@@ -7,7 +7,7 @@ from datetime import date
 from RestrictedPython import compile_restricted
 from RestrictedPython.Guards import safe_builtins, guarded_iter_unpack_sequence
 from app.models.detection import DetectionResult, AnomalyPoint
-from app.models.intent import FeedType
+from app.models.intent import FeedType, ThresholdConfig, ComparisonOperator
 from app.core.config import settings
 from app.core.logging import get_logger
 
@@ -18,74 +18,99 @@ class AbsoluteDetectionEngine:
     """
     Absolute (threshold-based) detection engine.
 
-    Compares current vs baseline value and triggers if change exceeds threshold.
+    Compares current vs baseline value and triggers based on threshold conditions.
+    Supports operators: >, <, >=, <=, ==, != with value comparisons.
     """
 
     @staticmethod
     def detect(
         current_value: float,
         baseline_value: float,
-        threshold: Optional[float] = None,
+        threshold_config: Optional[ThresholdConfig] = None,
+        threshold: Optional[float] = None,  # Legacy support
     ) -> DetectionResult:
         """
-        Detect if absolute change exceeds threshold.
+        Detect if threshold condition is met.
 
         Args:
             current_value: Current period metric value
             baseline_value: Baseline period metric value
-            threshold: Percentage threshold (default from settings)
+            threshold_config: New threshold configuration with operator and value
+            threshold: Legacy percentage threshold (for backward compatibility)
 
         Returns:
             DetectionResult
         """
-        if threshold is None:
-            threshold = settings.DEFAULT_ABSOLUTE_THRESHOLD
-
-        logger.info(
-            "absolute_detection",
-            current=current_value,
-            baseline=baseline_value,
-            threshold=threshold,
-        )
-
-        # Calculate deltas
+        # Calculate deltas for metrics
         absolute_delta = current_value - baseline_value
-
-        # Handle division by zero
+        
+        # Handle division by zero for percent change
         if baseline_value == 0:
             if current_value == 0:
                 percent_change = 0.0
             else:
-                # Infinite change - definitely trigger
                 percent_change = float('inf') if current_value > 0 else float('-inf')
         else:
             percent_change = (absolute_delta / baseline_value) * 100
 
-        # Check if triggered
+        # Determine trigger based on threshold config or legacy threshold
         triggered = False
         trigger_reason = ""
+        threshold_used = None
 
-        if abs(percent_change) >= threshold:
-            triggered = True
-            direction = "increased" if absolute_delta > 0 else "decreased"
-            trigger_reason = (
-                f"Metric {direction} by {abs(percent_change):.1f}% "
-                f"(threshold: {threshold}%)"
+        if threshold_config is not None:
+            # New value-based threshold with operator
+            logger.info(
+                "absolute_detection_with_config",
+                current=current_value,
+                baseline=baseline_value,
+                operator=threshold_config.operator.value,
+                threshold_value=threshold_config.value,
+                compare_to=threshold_config.compare_to,
             )
-        elif abs(absolute_delta) >= threshold:
-            # Also trigger on absolute delta
-            triggered = True
-            direction = "increased" if absolute_delta > 0 else "decreased"
-            trigger_reason = (
-                f"Metric {direction} by {abs(absolute_delta):.2f} "
-                f"(threshold: {threshold})"
+            
+            triggered = threshold_config.evaluate(current_value, baseline_value)
+            threshold_used = threshold_config.to_human_readable()
+            
+            if triggered:
+                direction = "increased" if absolute_delta > 0 else "decreased"
+                trigger_reason = (
+                    f"Alert triggered: {threshold_config.compare_to} value "
+                    f"({AbsoluteDetectionEngine._format_value(current_value if threshold_config.compare_to == 'current' else baseline_value)}) "
+                    f"meets condition '{threshold_config.to_human_readable()}'"
+                )
+            else:
+                trigger_reason = (
+                    f"Condition not met: {threshold_config.to_human_readable()} "
+                    f"(current: {AbsoluteDetectionEngine._format_value(current_value)}, "
+                    f"baseline: {AbsoluteDetectionEngine._format_value(baseline_value)})"
+                )
+        else:
+            # Legacy percentage-based threshold
+            if threshold is None:
+                threshold = settings.DEFAULT_ABSOLUTE_THRESHOLD
+            
+            logger.info(
+                "absolute_detection_legacy",
+                current=current_value,
+                baseline=baseline_value,
+                threshold_percent=threshold,
             )
-
-        if not triggered:
-            trigger_reason = (
-                f"Change of {abs(percent_change):.1f}% is below threshold "
-                f"({threshold}%)"
-            )
+            
+            threshold_used = f"{threshold}%"
+            
+            if abs(percent_change) >= threshold:
+                triggered = True
+                direction = "increased" if absolute_delta > 0 else "decreased"
+                trigger_reason = (
+                    f"Metric {direction} by {abs(percent_change):.1f}% "
+                    f"(threshold: {threshold}%)"
+                )
+            else:
+                trigger_reason = (
+                    f"Change of {abs(percent_change):.1f}% is below threshold "
+                    f"({threshold}%)"
+                )
 
         result = DetectionResult(
             triggered=triggered,
@@ -96,13 +121,13 @@ class AbsoluteDetectionEngine:
                 "baseline_value": baseline_value,
                 "absolute_delta": absolute_delta,
                 "percent_change": percent_change,
-                "threshold_used": threshold,
+                "threshold_used": threshold_used,
             },
             current_value=current_value,
             baseline_value=baseline_value,
             absolute_delta=absolute_delta,
             percent_change=percent_change,
-            threshold_used=threshold,
+            threshold_used=threshold_used,
         )
 
         logger.info(
@@ -112,6 +137,16 @@ class AbsoluteDetectionEngine:
         )
 
         return result
+
+    @staticmethod
+    def _format_value(value: float) -> str:
+        """Format value for human-readable display."""
+        if abs(value) >= 1_000_000:
+            return f"${value/1_000_000:.2f}M"
+        elif abs(value) >= 1_000:
+            return f"${value/1_000:.2f}K"
+        else:
+            return f"${value:.2f}"
 
 
 class ARIMADetectionEngine:

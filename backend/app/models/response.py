@@ -32,7 +32,7 @@ class InsightResponseNotTriggered(BaseModel):
     metric: str
     time_range: Dict[str, str]
     filters: Dict[str, Any] = Field(default_factory=dict)
-    metrics: Dict[str, float] = Field(default_factory=dict)
+    metrics: Dict[str, Any] = Field(default_factory=dict)  # Changed to Any to support various value types
 
 
 # Union type for API response

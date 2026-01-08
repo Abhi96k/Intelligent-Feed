@@ -46,14 +46,38 @@ class ChartBuilderService:
         """
         logger.info("building_trend_chart", metric=metric_name)
 
+        # Normalize column names - handle different column naming conventions
+        def get_date_value(row):
+            """Extract date and value from row with flexible column names."""
+            # Try different date column names
+            date_val = None
+            for col in ['date', 'Date', 'time', 'timestamp', 'period']:
+                if col in row.index:
+                    date_val = row[col]
+                    break
+            if date_val is None and len(row) > 0:
+                date_val = row.iloc[0]  # First column as date
+            
+            # Try different value column names
+            value_val = None
+            for col in ['value', 'Value', 'metric_value', 'amount']:
+                if col in row.index:
+                    value_val = row[col]
+                    break
+            if value_val is None and len(row) > 1:
+                value_val = row.iloc[-1]  # Last column as value
+            
+            return date_val, value_val
+
         # Prepare current period data
-        current_data = [
-            {
-                "date": row['date'].isoformat() if hasattr(row['date'], 'isoformat') else str(row['date']),
-                "value": float(row['value'])
-            }
-            for _, row in current_timeseries.iterrows()
-        ]
+        current_data = []
+        for _, row in current_timeseries.iterrows():
+            date_val, value_val = get_date_value(row)
+            if date_val is not None and value_val is not None:
+                current_data.append({
+                    "date": date_val.isoformat() if hasattr(date_val, 'isoformat') else str(date_val),
+                    "value": float(value_val) if value_val is not None else 0.0
+                })
 
         series = [
             Series(
@@ -67,13 +91,14 @@ class ChartBuilderService:
 
         # Add baseline if provided
         if baseline_timeseries is not None and len(baseline_timeseries) > 0:
-            baseline_data = [
-                {
-                    "date": row['date'].isoformat() if hasattr(row['date'], 'isoformat') else str(row['date']),
-                    "value": float(row['value'])
-                }
-                for _, row in baseline_timeseries.iterrows()
-            ]
+            baseline_data = []
+            for _, row in baseline_timeseries.iterrows():
+                date_val, value_val = get_date_value(row)
+                if date_val is not None and value_val is not None:
+                    baseline_data.append({
+                        "date": date_val.isoformat() if hasattr(date_val, 'isoformat') else str(date_val),
+                        "value": float(value_val) if value_val is not None else 0.0
+                    })
             series.append(
                 Series(
                     name="Baseline Period",
@@ -90,18 +115,27 @@ class ChartBuilderService:
         # Add threshold line for absolute detection
         if detection_result and detection_result.is_absolute() and detection_result.threshold_used:
             if detection_result.baseline_value:
-                threshold_value = detection_result.baseline_value * (
-                    1 + detection_result.threshold_used / 100
-                )
-                annotations.append(
-                    Annotation(
-                        type=AnnotationType.THRESHOLD,
-                        value=threshold_value,
-                        label=f"Threshold ({detection_result.threshold_used}%)",
-                        color="#ff9800",
-                        style="dashed",
+                # Handle both numeric (legacy) and string (new format) threshold_used
+                threshold_label = str(detection_result.threshold_used)
+                
+                # Only calculate threshold line for percentage-based thresholds
+                if isinstance(detection_result.threshold_used, (int, float)):
+                    threshold_value = detection_result.baseline_value * (
+                        1 + detection_result.threshold_used / 100
                     )
-                )
+                    annotations.append(
+                        Annotation(
+                            type=AnnotationType.THRESHOLD,
+                            value=threshold_value,
+                            label=f"Threshold ({threshold_label}%)",
+                            color="#ff9800",
+                            style="dashed",
+                        )
+                    )
+                # For string-based thresholds (e.g., "current > 3000000"), add a reference line if possible
+                elif isinstance(detection_result.threshold_used, str) and detection_result.current_value:
+                    # Just add a label annotation without calculating a line
+                    pass  # Skip threshold line for value-based comparisons
 
         # Add anomaly markers for ARIMA detection
         if detection_result and detection_result.is_arima() and detection_result.anomaly_points:
@@ -306,7 +340,7 @@ class ChartBuilderService:
         has_timeseries = (
             current_timeseries is not None and 
             len(current_timeseries) > 0 and 
-            'date' in current_timeseries.columns
+            any(col in current_timeseries.columns for col in ['date', 'Date', 'time', 'timestamp', 'period'])
         )
         
         if has_timeseries:

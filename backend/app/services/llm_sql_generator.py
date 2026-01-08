@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional, Tuple
 from anthropic import Anthropic
 from app.models.plan import TQLPlan, PlanMetadata
-from app.models.intent import ParsedIntent, TimeRange, BaselineConfig, FeedType, BaselineType
+from app.models.intent import ParsedIntent, TimeRange, BaselineConfig, FeedType, BaselineType, ThresholdConfig, ComparisonOperator
 from app.services.bv_context_builder import BVContext
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -181,7 +181,11 @@ Return ONLY valid JSON:
       "end_date": "YYYY-MM-DD"
     }},
     "feed_type": "absolute|arima",
-    "threshold": 5.0
+    "threshold_config": {{
+      "operator": "greater_than|less_than|greater_than_equal|less_than_equal|equal|not_equal|change_greater_than|change_less_than",
+      "value": 1000000,
+      "compare_to": "current|baseline|change|percent_change"
+    }}
   }},
   "sql": {{
     "current_period_query": "SELECT ... AS metric_value FROM ... WHERE ...",
@@ -194,20 +198,76 @@ Return ONLY valid JSON:
     "should_trigger_alert": true,
     "alert_type": "drop|increase|anomaly|spike",
     "severity": "low|medium|high|critical",
-    "threshold_percent": 5.0,
     "description": "Brief description of what to look for"
   }}
 }}
 ```
 
+## Threshold Configuration Guide
+The threshold_config determines when to trigger an alert:
+
+### Operators:
+- "greater_than": current > value (e.g., revenue > $1M)
+- "less_than": current < value (e.g., profit < $100K)
+- "greater_than_equal": current >= value
+- "less_than_equal": current <= value
+- "equal": current == value
+- "not_equal": current != value
+- "change_greater_than": |current - baseline| > value (e.g., change > $50K)
+- "change_less_than": |current - baseline| < value
+
+### compare_to:
+- "current": Compare current period value against threshold
+- "baseline": Compare baseline period value against threshold
+- "change": Compare absolute change (current - baseline) against threshold
+- "percent_change": Compare percentage change against threshold
+
+### Examples:
+- User asks "Alert if revenue drops below $1M" → operator: "less_than", value: 1000000, compare_to: "current"
+- User asks "Alert if profit exceeds $500K" → operator: "greater_than", value: 500000, compare_to: "current"
+- User asks "Alert if change is more than $100K" → operator: "change_greater_than", value: 100000, compare_to: "change"
+- User asks "Why did revenue drop?" (no specific threshold) → operator: "change_greater_than", value: 0, compare_to: "change" (any change triggers)
+
 ## Important Notes
 - Generate complete, executable SQL queries
 - Include all necessary JOINs
 - Use proper date filtering based on the time range
-- If the user asks about "drop", "decrease", "decline" -> feed_type should be "absolute"
-- If the user asks about "anomaly", "unusual", "spike" -> feed_type should be "arima"
 - Always generate dimensional_breakdown_query for root-cause analysis
 - For timeseries_query, GROUP BY date_dim.date and ORDER BY date_dim.date
+
+## Choosing feed_type (CRITICAL - Understand User Intent)
+
+Choose feed_type based on the SEMANTIC INTENT of the question, NOT just keywords:
+
+### Use "absolute" when the user's intent is to:
+- **Compare two specific time periods** (e.g., "Q3 vs Q2", "this month vs last month", "2024 vs 2023")
+- **Understand WHY a change happened** between two periods (e.g., "Why did revenue drop?", "What caused the increase?")
+- **Quantify a difference** between current and baseline (e.g., "How much did profit change?")
+- **Explain root causes** of a known change (e.g., "What drove the growth in Enterprise segment?")
+- The user implies or explicitly mentions a comparison baseline period
+
+### Use "arima" when the user's intent is to:
+- **Detect unusual patterns or outliers** in the data over time (e.g., "Find anomalies in sales")
+- **Identify unexpected behavior** without a specific comparison period (e.g., "Is there anything unusual?")
+- **Monitor for deviations from expected trends** (e.g., "Alert me if revenue behaves abnormally")
+- **Analyze time-series patterns** for statistical outliers (e.g., "Detect spikes in the last 6 months")
+- The user wants to find anomalies within a SINGLE time range (not comparing two periods)
+
+### Decision Framework:
+1. Does the user mention or imply TWO time periods to compare? → "absolute"
+2. Is the user asking WHY something changed between periods? → "absolute" 
+3. Is the user looking for outliers/anomalies within a single time range? → "arima"
+4. Is the user asking for pattern/trend monitoring without baseline? → "arima"
+5. Default: If comparing periods or asking "why" → "absolute"; If detecting anomalies → "arima"
+
+### Examples:
+- "Why did revenue drop in Q3 2024?" → "absolute" (asking WHY, implies comparison to previous period)
+- "Show me anomalies in revenue for 2024" → "arima" (detecting outliers in a time series)
+- "Compare Q4 sales to Q3" → "absolute" (explicit two-period comparison)
+- "Is there anything unusual about November sales?" → "arima" (looking for unexpected patterns)
+- "What caused the profit spike in October?" → "absolute" (asking WHY a known change happened)
+- "Detect any irregular patterns in customer count" → "arima" (pattern detection)
+- "Revenue dropped 20% - what happened?" → "absolute" (explaining a known change)
 
 Return only the JSON, no additional text.
 """
@@ -262,13 +322,30 @@ Return only the JSON, no additional text.
         feed_type_str = intent.get("feed_type", "absolute")
         feed_type = FeedType.ARIMA if feed_type_str == "arima" else FeedType.ABSOLUTE
 
+        # Parse threshold config (new value-based thresholds)
+        threshold_config = None
+        threshold_config_data = intent.get("threshold_config")
+        if threshold_config_data:
+            try:
+                operator_str = threshold_config_data.get("operator", "greater_than")
+                operator = ComparisonOperator(operator_str)
+                threshold_config = ThresholdConfig(
+                    operator=operator,
+                    value=float(threshold_config_data.get("value", 0)),
+                    compare_to=threshold_config_data.get("compare_to", "current"),
+                )
+            except (ValueError, KeyError) as e:
+                logger.warning("failed_to_parse_threshold_config", error=str(e))
+                threshold_config = None
+
         return ParsedIntent(
             metric=intent.get("metric", "Revenue"),
             time_range=time_range,
             filters=intent.get("filters", {}),
             baseline=baseline,
             feed_type=feed_type,
-            threshold=intent.get("threshold"),
+            threshold=intent.get("threshold"),  # Legacy support
+            threshold_config=threshold_config,
         )
 
     def _calculate_complexity(self, sql: Dict[str, Any]) -> int:

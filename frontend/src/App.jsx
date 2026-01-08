@@ -85,20 +85,24 @@ function App() {
       if (results.evidence?.drivers && results.evidence.drivers.length > 0) {
         const topDrivers = results.evidence.drivers.slice(0, 3);
         topDrivers.forEach((driver) => {
+          // Backend returns: dimension, member, impact, contribution_current, contribution_baseline, shift, value_current, value_baseline
+          const driverName = driver.member || driver.dimension_value || driver.name || "Unknown";
+          const contributionPct = driver.contribution_current || driver.contribution_pct || 0;
+          const impactValue = driver.impact || driver.impact_score || driver.shift || 0;
+          const direction = driver.shift > 0 ? "increase" : driver.shift < 0 ? "decrease" : "neutral";
+          
           insights.push({
             insight_type: "driver",
             triggered: true,
-            title: `Driver: ${driver.dimension_value || driver.name}`,
-            description: `Contribution: ${(
-              driver.contribution_pct || 0
-            ).toFixed(1)}%`,
-            confidence: driver.contribution_pct
-              ? driver.contribution_pct / 100
-              : 0.5,
+            title: `Driver: ${driverName}`,
+            description: `Contribution: ${contributionPct.toFixed(1)}%`,
+            confidence: contributionPct / 100,
             metadata: {
               dimension: driver.dimension,
-              impact: driver.impact_score || driver.absolute_change,
-              direction: driver.change_direction || "neutral",
+              impact: impactValue,
+              direction: direction,
+              value_current: driver.value_current,
+              value_baseline: driver.value_baseline,
             },
           });
         });
@@ -154,15 +158,18 @@ function App() {
 
   // Get driver data for chart
   const getDriverData = () => {
-    if (!results?.evidence?.drivers) return null;
+    if (!results?.evidence?.drivers || results.evidence.drivers.length === 0) return null;
 
     return {
-      drivers: results.evidence.drivers.map((d) => ({
-        driver_name: d.dimension_value || d.name,
-        impact_score: d.contribution_pct || d.impact_score || 0,
-        direction: d.change_direction === "increase" ? "positive" : "negative",
+      drivers: results.evidence.drivers.map((d, index) => ({
+        // Backend returns: dimension, member, impact, contribution_current, shift, value_current, value_baseline
+        driver_name: d.member || d.dimension_value || d.name || `Driver ${index + 1}`,
+        impact_score: d.contribution_current || d.contribution_pct || d.impact_score || 0,
+        direction: d.shift > 0 ? "positive" : d.shift < 0 ? "negative" : "neutral",
+        isPrimary: index === 0,
       })),
       primary_driver:
+        results.evidence.drivers[0]?.member ||
         results.evidence.drivers[0]?.dimension_value ||
         results.evidence.drivers[0]?.name,
     };

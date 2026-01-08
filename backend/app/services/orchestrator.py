@@ -156,12 +156,12 @@ class IntelligentFeedOrchestrator:
 
             # STEP 6: Build charts
             logger.info("step_6_building_charts")
-            # Handle pandas DataFrame truth value issue
-            current_ts = results.timeseries if results.timeseries is not None and len(results.timeseries) > 0 else results.current_period
+            # Use timeseries if available (for trend charts), otherwise skip trend chart
+            has_timeseries = results.timeseries is not None and len(results.timeseries) > 0
             charts = ChartBuilderService.build_all_charts(
                 metric_name=intent.metric,
-                current_timeseries=current_ts,
-                baseline_timeseries=results.baseline_period,
+                current_timeseries=results.timeseries if has_timeseries else None,
+                baseline_timeseries=None,  # Only pass if we have actual timeseries baseline
                 detection_result=detection_result,
                 deep_insight=deep_insight,
             )
@@ -217,10 +217,12 @@ class IntelligentFeedOrchestrator:
             current_value = results.get_current_value() or 0
             baseline_value = results.get_baseline_value() or 0
 
+            # Use new threshold_config if available, otherwise fall back to legacy threshold
             detection_result = AbsoluteDetectionEngine.detect(
                 current_value=current_value,
                 baseline_value=baseline_value,
-                threshold=intent.threshold,
+                threshold_config=intent.threshold_config,
+                threshold=intent.threshold,  # Legacy fallback
             )
         else:
             # ARIMA detection requires time-series
@@ -237,6 +239,8 @@ class IntelligentFeedOrchestrator:
                 detection_result = AbsoluteDetectionEngine.detect(
                     current_value=current_value,
                     baseline_value=baseline_value,
+                    threshold_config=intent.threshold_config,
+                    threshold=intent.threshold,
                 )
 
         return detection_result
