@@ -277,8 +277,11 @@ function IntelligentFeedPage({ triggeredAlerts, feeds, onViewDetails, onFetchFee
             >
               {/* Main Alert Card */}
               <div
+                role="button"
+                tabIndex={0}
                 onClick={() => handleAlertClick(alert)}
-                className="p-6 cursor-pointer hover:bg-gray-50 transition-colors"
+                onKeyDown={(e) => e.key === 'Enter' && handleAlertClick(alert)}
+                className="p-6 cursor-pointer hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-inset"
               >
                 <div className="flex items-start justify-between">
                   <div className="flex items-start space-x-4">
