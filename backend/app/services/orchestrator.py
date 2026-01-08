@@ -1,7 +1,7 @@
 """Intelligent Feed Orchestrator - Coordinates entire insight generation pipeline."""
 
 import asyncio
-from typing import Union
+from typing import Union, Dict, Any
 from app.models.business_view import BusinessView
 from app.models.response import (
     InsightResponseTriggered,
@@ -10,15 +10,13 @@ from app.models.response import (
 )
 from app.services import (
     BVContextBuilder,
-    QuestionParser,
-    TQLPlanner,
-    PlanValidator,
     TQLAdapter,
     AbsoluteDetectionEngine,
     ARIMADetectionEngine,
     DeepInsightEngine,
     ChartBuilderService,
     NarrativeGenerator,
+    LLMSQLGenerator,
 )
 from app.core.logging import get_logger
 
@@ -30,6 +28,13 @@ class IntelligentFeedOrchestrator:
     Main orchestrator for the Intelligent Feed system.
 
     Coordinates all components to generate deep insights from user questions.
+    
+    NEW FLOW (LLM-generated SQL):
+    1. User question -> LLM SQL Generator -> SQL queries + parsed intent
+    2. SQL queries -> TQL Adapter -> Query results
+    3. Results -> Detection Engine -> Triggered/Not Triggered
+    4. If triggered -> Deep Insight Engine -> Root Cause Analysis
+    5. Charts + Narrative generation
     """
 
     def __init__(self, business_view: BusinessView, db_path: str = "tellius_feed.db"):
@@ -45,7 +50,7 @@ class IntelligentFeedOrchestrator:
 
         # Initialize services
         self.bv_context = BVContextBuilder.build(business_view)
-        self.question_parser = QuestionParser()
+        self.llm_sql_generator = LLMSQLGenerator()
         self.tql_adapter = TQLAdapter(db_path)
         self.narrative_generator = NarrativeGenerator()
 
@@ -53,11 +58,12 @@ class IntelligentFeedOrchestrator:
             "orchestrator_initialized",
             business_view=business_view.id,
             db_path=db_path,
+            flow="llm_sql_generation",
         )
 
     async def generate_insight(self, user_question: str) -> InsightResponse:
         """
-        Generate insight from user question.
+        Generate insight from user question using LLM-generated SQL.
 
         This is the main entry point for the Intelligent Feed system.
 
@@ -70,26 +76,29 @@ class IntelligentFeedOrchestrator:
         logger.info("insight_generation_started", question=user_question)
 
         try:
-            # STEP 1: Parse question into structured intent
-            logger.info("step_1_parsing_question")
-            intent = await self.question_parser.parse(user_question, self.bv_context)
-            logger.info("question_parsed", intent=intent.to_dict())
-
-            # STEP 2: Generate TQL plan
-            logger.info("step_2_generating_tql_plan")
-            plan = TQLPlanner.generate(intent, self.business_view)
-            logger.info("tql_plan_generated", queries=len(plan.get_all_queries()))
-
-            # STEP 3: Validate plan
-            logger.info("step_3_validating_plan")
-            validated_plan = PlanValidator.validate(plan, self.bv_context)
-            logger.info("plan_validated")
-
-            # STEP 4: Execute queries
-            logger.info("step_4_executing_queries")
-            results = self.tql_adapter.execute(validated_plan)
+            # STEP 1: Generate SQL and parse intent using LLM
+            logger.info("step_1_llm_sql_generation")
+            llm_response = await self.llm_sql_generator.generate(
+                user_question, self.bv_context
+            )
+            
+            intent = llm_response.parsed_intent
+            plan = llm_response.tql_plan
+            alert_config = self.llm_sql_generator.get_alert_config(llm_response.raw_llm_response)
+            
             logger.info(
-                "queries_executed",
+                "llm_sql_generated",
+                metric=intent.metric,
+                feed_type=intent.feed_type.value,
+                queries_count=len(plan.get_all_queries()),
+                alert_type=alert_config.get("alert_type", "unknown"),
+            )
+
+            # STEP 2: Execute LLM-generated SQL queries via TQL Adapter
+            logger.info("step_2_executing_tql_queries")
+            results = self.tql_adapter.execute(plan)
+            logger.info(
+                "tql_queries_executed",
                 current_rows=len(results.current_period) if results.current_period is not None else 0,
                 baseline_rows=len(results.baseline_period) if results.baseline_period is not None else 0,
             )
@@ -111,8 +120,8 @@ class IntelligentFeedOrchestrator:
                     metrics={"current_value": 0.0, "baseline_value": 0.0},
                 )
 
-            # STEP 5: Run detection
-            logger.info("step_5_running_detection", feed_type=intent.feed_type.value)
+            # STEP 3: Run detection
+            logger.info("step_3_running_detection", feed_type=intent.feed_type.value)
             detection_result = await self._run_detection(intent, results)
             logger.info(
                 "detection_completed",
@@ -120,13 +129,13 @@ class IntelligentFeedOrchestrator:
                 reason=detection_result.trigger_reason,
             )
 
-            # STEP 6: If not triggered, return early
+            # STEP 4: If not triggered, return early with alert info
             if not detection_result.triggered:
                 logger.info("insight_not_triggered", reason=detection_result.trigger_reason)
                 return InsightResponseNotTriggered(
                     triggered=False,
                     explanation=detection_result.trigger_reason,
-                    suggestion=self._generate_suggestion(detection_result, intent),
+                    suggestion=self._generate_suggestion(detection_result, intent, alert_config),
                     metric=intent.metric,
                     time_range={
                         "start": str(intent.time_range.start_date),
@@ -136,8 +145,8 @@ class IntelligentFeedOrchestrator:
                     metrics=detection_result.metrics,
                 )
 
-            # STEP 7: Generate deep insight (only if triggered)
-            logger.info("step_7_generating_deep_insight")
+            # STEP 5: Generate deep insight (only if triggered)
+            logger.info("step_5_generating_deep_insight")
             deep_insight = await self._generate_deep_insight(results, detection_result)
             logger.info(
                 "deep_insight_generated",
@@ -145,26 +154,28 @@ class IntelligentFeedOrchestrator:
                 explainability=deep_insight.explainability_score,
             )
 
-            # STEP 8: Build charts
-            logger.info("step_8_building_charts")
+            # STEP 6: Build charts
+            logger.info("step_6_building_charts")
+            # Handle pandas DataFrame truth value issue
+            current_ts = results.timeseries if results.timeseries is not None and len(results.timeseries) > 0 else results.current_period
             charts = ChartBuilderService.build_all_charts(
                 metric_name=intent.metric,
-                current_timeseries=results.timeseries or results.current_period,
+                current_timeseries=current_ts,
                 baseline_timeseries=results.baseline_period,
                 detection_result=detection_result,
                 deep_insight=deep_insight,
             )
             logger.info("charts_built", count=len(charts))
 
-            # STEP 9: Generate narrative
-            logger.info("step_9_generating_narrative")
+            # STEP 7: Generate narrative
+            logger.info("step_7_generating_narrative")
             what_happened, why_happened = await self.narrative_generator.generate(
                 detection_result, deep_insight, intent
             )
             logger.info("narrative_generated")
 
-            # STEP 10: Build response
-            logger.info("step_10_building_response")
+            # STEP 8: Build response with alert information
+            logger.info("step_8_building_response")
             response = InsightResponseTriggered(
                 triggered=True,
                 trigger_reason=detection_result.trigger_reason,
@@ -176,6 +187,13 @@ class IntelligentFeedOrchestrator:
                     "detection": detection_result.metrics,
                     "drivers": [d.to_dict() for d in deep_insight.get_top_n_drivers(10)],
                     "insight_summary": deep_insight.to_summary_dict(),
+                    "alert": alert_config,
+                    "llm_generated_sql": {
+                        "current_period": plan.current_period_query,
+                        "baseline_period": plan.baseline_period_query,
+                        "timeseries": plan.timeseries_query,
+                        "dimensional_breakdown": plan.dimensional_breakdown_query,
+                    },
                 },
                 metric=intent.metric,
                 time_range={
@@ -241,7 +259,7 @@ class IntelligentFeedOrchestrator:
 
         # Determine dimension name from breakdown
         # Assume first non-'value' column is the dimension
-        dimension_cols = [col for col in current_breakdown.columns if col != 'value']
+        dimension_cols = [col for col in current_breakdown.columns if col not in ['value', 'metric_value']]
         dimension_name = dimension_cols[0] if dimension_cols else "dimension"
 
         # Perform deep insight analysis
@@ -254,11 +272,14 @@ class IntelligentFeedOrchestrator:
 
         return deep_insight
 
-    def _generate_suggestion(self, detection_result, intent) -> str:
+    def _generate_suggestion(self, detection_result, intent, alert_config: Dict[str, Any]) -> str:
         """Generate suggestion when insight is not triggered."""
+        alert_type = alert_config.get("alert_type", "unknown")
+        threshold = alert_config.get("threshold_percent", 5.0)
+        
         if detection_result.feed_type.value == "absolute":
             return (
-                f"The change in {intent.metric} is within normal variance. "
+                f"The change in {intent.metric} ({alert_type}) is within normal variance (threshold: {threshold}%). "
                 f"Consider lowering the threshold or checking a different time period."
             )
         else:

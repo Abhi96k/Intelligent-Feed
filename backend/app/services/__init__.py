@@ -9,6 +9,7 @@ from .detection_engine import AbsoluteDetectionEngine, ARIMADetectionEngine
 from .deep_insight_engine import DeepInsightEngine
 from .chart_builder import ChartBuilderService
 from .narrative_generator import NarrativeGenerator
+from .llm_sql_generator import LLMSQLGenerator, LLMSQLGeneratorResponse
 
 __all__ = [
     "BVContextBuilder",
@@ -22,4 +23,6 @@ __all__ = [
     "DeepInsightEngine",
     "ChartBuilderService",
     "NarrativeGenerator",
+    "LLMSQLGenerator",
+    "LLMSQLGeneratorResponse",
 ]
