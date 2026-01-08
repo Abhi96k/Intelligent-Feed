@@ -1,0 +1,153 @@
+{
+  "question": "Why did revenue drop in Q3?",
+  "insights": [
+    {
+      "insight_type": "anomaly",
+      "triggered": true,
+      "title": "Revenue Anomaly Detected",
+      "description": "A significant drop in revenue was detected in Q3, approximately 15% below the expected trend based on historical patterns.",
+      "confidence": 0.92,
+      "metadata": {
+        "severity": "high",
+        "time_period": "Q3 2024",
+        "expected_value": 1000000,
+        "actual_value": 850000
+      }
+    },
+    {
+      "insight_type": "trend",
+      "triggered": true,
+      "title": "Declining Trend Identified",
+      "description": "Revenue has been on a declining trend for the past 3 months, with a month-over-month decrease averaging 5%.",
+      "confidence": 0.88,
+      "metadata": {
+        "trend_duration": "3 months",
+        "average_decline": -5
+      }
+    },
+    {
+      "insight_type": "correlation",
+      "triggered": false,
+      "title": "Seasonal Pattern Not Detected",
+      "description": "No significant seasonal pattern was found that could explain the Q3 revenue drop.",
+      "confidence": 0.65,
+      "metadata": {
+        "seasonality_score": 0.23
+      }
+    }
+  ],
+  "primary_trend": {
+    "metric_name": "Revenue",
+    "time_series": [
+      {
+        "date": "2024-01-01",
+        "value": 950000
+      },
+      {
+        "date": "2024-02-01",
+        "value": 980000
+      },
+      {
+        "date": "2024-03-01",
+        "value": 1020000
+      },
+      {
+        "date": "2024-04-01",
+        "value": 1050000
+      },
+      {
+        "date": "2024-05-01",
+        "value": 1080000
+      },
+      {
+        "date": "2024-06-01",
+        "value": 1100000
+      },
+      {
+        "date": "2024-07-01",
+        "value": 1050000
+      },
+      {
+        "date": "2024-08-01",
+        "value": 950000
+      },
+      {
+        "date": "2024-09-01",
+        "value": 850000
+      },
+      {
+        "date": "2024-10-01",
+        "value": 820000
+      }
+    ],
+    "trend_direction": "down",
+    "percent_change": -15.2,
+    "anomalies": [
+      {
+        "date": "2024-09-01",
+        "value": 850000,
+        "severity": "high"
+      }
+    ]
+  },
+  "driver_impact": {
+    "drivers": [
+      {
+        "driver_name": "Customer Acquisition Cost",
+        "impact_score": -0.45,
+        "direction": "negative",
+        "metadata": {
+          "current_value": 150,
+          "previous_value": 100,
+          "change_percent": 50
+        }
+      },
+      {
+        "driver_name": "Market Competition",
+        "impact_score": -0.32,
+        "direction": "negative",
+        "metadata": {
+          "competitors_entered": 3
+        }
+      },
+      {
+        "driver_name": "Product Quality",
+        "impact_score": -0.18,
+        "direction": "negative",
+        "metadata": {
+          "defect_rate": 0.05
+        }
+      },
+      {
+        "driver_name": "Marketing Spend",
+        "impact_score": 0.12,
+        "direction": "positive",
+        "metadata": {
+          "spend_increase": 15000
+        }
+      },
+      {
+        "driver_name": "Customer Retention",
+        "impact_score": 0.08,
+        "direction": "positive",
+        "metadata": {
+          "retention_rate": 0.85
+        }
+      }
+    ],
+    "primary_driver": "Customer Acquisition Cost",
+    "metadata": {
+      "analysis_method": "regression",
+      "r_squared": 0.78
+    }
+  },
+  "summary": "The Q3 revenue drop of 15.2% was primarily driven by a significant increase in Customer Acquisition Cost (up 50%), combined with increased market competition. While marketing spend and customer retention showed positive impacts, they were insufficient to offset the negative drivers. Immediate action is recommended to optimize customer acquisition strategies and address competitive pressures.",
+  "metadata": {
+    "analysis_timestamp": "2024-10-15T10:30:00Z",
+    "total_insights": 3,
+    "triggered_insights": 2,
+    "confidence_score": 0.85,
+    "model_version": "1.0.0",
+    "processing_time_ms": 1250
+  }
+}
