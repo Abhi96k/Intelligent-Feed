@@ -630,7 +630,8 @@ async def refresh_business_view(bv_name: str):
                     triggered_at=run_time,
                     results=result.model_dump(),
                 )
-                triggered_alerts_db[alert_id] = alert
+                # Use feed.id as key to consolidate alerts per feed (only keep latest)
+                triggered_alerts_db[feed.id] = alert
                 new_alerts.append(alert)
                 triggered_count += 1
                 run_record.alert_id = alert_id

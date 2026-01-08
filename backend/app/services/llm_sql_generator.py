@@ -162,6 +162,12 @@ The tables are joined as follows:
 ## Current Date
 {datetime.now().date().isoformat()}
 
+## IMPORTANT: Database Data Range
+The database contains historical data from **2023-01-01 to 2024-12-31** only.
+- If the user's question does not specify a date range, use 2024 as the default year (e.g., "2024-01-01" to "2024-12-31").
+- If the user asks about "current" or "recent" data, use the last available date range: 2024-10-01 to 2024-12-31.
+- NEVER generate dates beyond 2024-12-31 as there is no data for those dates.
+
 ## User Question
 "{question}"
 
@@ -213,10 +219,10 @@ Return ONLY valid JSON:
   }},
   "sql": {{
     "current_period_query": "SELECT ... AS metric_value FROM ... WHERE ...",
-    "baseline_period_query": "SELECT ... AS metric_value FROM ... WHERE ..." or null,
+    "baseline_period_query": "SELECT ... AS metric_value FROM ... WHERE ... (ALWAYS REQUIRED - use previous year if not specified)",
     "timeseries_query": "SELECT date, value FROM ... GROUP BY date ORDER BY date" or null,
-    "dimensional_breakdown_query": "SELECT dimension, metric_value FROM ... GROUP BY dimension",
-    "baseline_dimensional_breakdown_query": "..." or null
+    "dimensional_breakdown_query": "SELECT dimension, metric_value FROM ... GROUP BY dimension (ALWAYS REQUIRED)",
+    "baseline_dimensional_breakdown_query": "SELECT dimension, metric_value FROM ... GROUP BY dimension (ALWAYS REQUIRED)"
   }},
   "alert_config": {{
     "should_trigger_alert": true,
@@ -252,12 +258,28 @@ The threshold_config determines when to trigger an alert:
 - User asks "Alert if change is more than $100K" → operator: "change_greater_than", value: 100000, compare_to: "change"
 - User asks "Why did revenue drop?" (no specific threshold) → operator: "change_greater_than", value: 0, compare_to: "change" (any change triggers)
 
-## Important Notes
+## Important Notes - MANDATORY REQUIREMENTS
 - Generate complete, executable SQL queries
 - Include all necessary JOINs
 - Use proper date filtering based on the time range
-- Always generate dimensional_breakdown_query for root-cause analysis
+
+### CRITICAL: Always Generate These Queries (NEVER leave them null):
+1. **baseline_period_query** - ALWAYS required for driver analysis:
+   - If user specifies a comparison period, use that
+   - Otherwise, use the PREVIOUS YEAR as default baseline (e.g., if current is 2024, baseline is 2023)
+   - For monthly data, compare to same month previous year
+   - This enables meaningful change analysis and driver insights
+   
+2. **dimensional_breakdown_query** - ALWAYS required for root-cause:
+   - Break down by the most relevant dimension (usually region, category, or product)
+   - Shows which dimension members contribute most to the current value
+   
+3. **baseline_dimensional_breakdown_query** - ALWAYS required when baseline exists:
+   - Same structure as dimensional_breakdown_query but for baseline period
+   - Enables comparison of which drivers changed
+
 - For timeseries_query, GROUP BY date_dim.date and ORDER BY date_dim.date
+- For dimensional queries, GROUP BY only ONE dimension at a time
 
 ## Choosing feed_type (CRITICAL - Understand User Intent)
 

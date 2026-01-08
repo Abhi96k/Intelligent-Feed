@@ -1,8 +1,8 @@
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, Scatter, ComposedChart, Cell } from 'recharts'
 
 /**
  * TrendChart Component
- * Displays time series trend data using a line chart
+ * Displays time series trend data using a line chart with anomaly markers
  *
  * @param {Object} props
  * @param {Object} props.data - Trend data object
@@ -10,6 +10,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
  * @param {Array} props.data.time_series - Array of {date, value} objects
  * @param {string} props.data.trend_direction - Direction of trend (up/down/stable)
  * @param {number} props.data.percent_change - Percentage change
+ * @param {Array} props.data.anomalies - Array of anomaly points
  */
 function TrendChart({ data }) {
   if (!data || !data.time_series || data.time_series.length === 0) {
@@ -28,24 +29,65 @@ function TrendChart({ data }) {
     time_series = [],
     trend_direction = 'stable',
     percent_change = 0,
+    anomalies = [],
   } = data
 
-  // Format the data for Recharts
-  const chartData = time_series.map(point => ({
-    date: point.date || point.time || point.timestamp,
-    value: point.value,
-    label: formatDate(point.date || point.time || point.timestamp),
-  }))
+  // Helper to extract just the date part (handles "2024-01-01", "2024-01-01T00:00:00", "2024-01-01 00:00:00")
+  const extractDatePart = (dateStr) => {
+    if (!dateStr) return ''
+    // Handle both ISO format (T separator) and space separator
+    return dateStr.split('T')[0].split(' ')[0]
+  }
+
+  // Create a Set of anomaly dates for fast lookup
+  const anomalyDates = new Set(
+    anomalies.map(a => extractDatePart(a.date))
+  )
+  
+  // Get anomaly severity for a date
+  const getAnomalySeverity = (dateStr) => {
+    const targetDate = extractDatePart(dateStr)
+    const anomaly = anomalies.find(a => extractDatePart(a.date) === targetDate)
+    return anomaly?.severity || null
+  }
+
+  // Format the data for Recharts, marking anomalies
+  const chartData = time_series.map(point => {
+    const dateStr = point.date || point.time || point.timestamp
+    const datePart = extractDatePart(dateStr)
+    const isAnomaly = anomalyDates.has(datePart)
+    return {
+      date: dateStr,
+      value: point.value,
+      label: formatDate(dateStr),
+      isAnomaly,
+      anomalyValue: isAnomaly ? point.value : null,
+      severity: isAnomaly ? getAnomalySeverity(dateStr) : null,
+    }
+  })
 
   // Custom tooltip
   const CustomTooltip = ({ active, payload }) => {
     if (active && payload && payload.length) {
+      const dataPoint = payload[0].payload
       return (
-        <div className="bg-white p-3 border border-gray-200 rounded-lg shadow-lg">
-          <p className="text-xs text-gray-500 mb-1">{payload[0].payload.label}</p>
+        <div className={`p-3 border rounded-lg shadow-lg ${dataPoint.isAnomaly ? 'bg-red-50 border-red-300' : 'bg-white border-gray-200'}`}>
+          <p className="text-xs text-gray-500 mb-1">{dataPoint.label}</p>
           <p className="text-sm font-semibold text-gray-900">
             {metric_name}: {formatValue(payload[0].value)}
           </p>
+          {dataPoint.isAnomaly && (
+            <div className="mt-2 pt-2 border-t border-red-200">
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                ⚠️ Anomaly Detected
+              </span>
+              {dataPoint.severity && (
+                <p className="text-xs text-red-600 mt-1">
+                  Severity: {typeof dataPoint.severity === 'number' ? (dataPoint.severity > 0.7 ? 'High' : dataPoint.severity > 0.4 ? 'Medium' : 'Low') : dataPoint.severity}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )
     }
@@ -110,7 +152,7 @@ function TrendChart({ data }) {
       </div>
 
       <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+        <ComposedChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
           <XAxis
             dataKey="date"
@@ -131,19 +173,55 @@ function TrendChart({ data }) {
             dataKey="value"
             stroke={getTrendColor()}
             strokeWidth={2}
-            dot={{ fill: getTrendColor(), r: 4 }}
+            dot={(props) => {
+              const { cx, cy, payload } = props
+              if (payload.isAnomaly) {
+                return (
+                  <circle
+                    key={`anomaly-${cx}-${cy}`}
+                    cx={cx}
+                    cy={cy}
+                    r={8}
+                    fill="#ef4444"
+                    stroke="#fff"
+                    strokeWidth={2}
+                  />
+                )
+              }
+              return (
+                <circle
+                  key={`normal-${cx}-${cy}`}
+                  cx={cx}
+                  cy={cy}
+                  r={3}
+                  fill={getTrendColor()}
+                />
+              )
+            }}
             activeDot={{ r: 6 }}
             name={metric_name}
           />
-        </LineChart>
+        </ComposedChart>
       </ResponsiveContainer>
 
-      {/* Additional Info */}
-      {data.anomalies && data.anomalies.length > 0 && (
+      {/* Anomaly Legend & Info */}
+      {anomalies && anomalies.length > 0 && (
         <div className="mt-4 pt-4 border-t border-gray-200">
-          <p className="text-xs font-medium text-gray-700 mb-2">
-            Anomalies Detected: {data.anomalies.length}
-          </p>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center">
+                <span className="w-4 h-4 rounded-full bg-red-500 mr-2"></span>
+                <span className="text-xs text-gray-600">Anomaly Points ({anomalies.length})</span>
+              </div>
+              <div className="flex items-center">
+                <span className="w-4 h-4 rounded-full mr-2" style={{ backgroundColor: getTrendColor() }}></span>
+                <span className="text-xs text-gray-600">Normal Data</span>
+              </div>
+            </div>
+            <span className="text-xs font-medium text-red-600">
+              {anomalies.filter(a => a.severity > 0.7 || a.severity === 'high').length} High Severity
+            </span>
+          </div>
         </div>
       )}
     </div>

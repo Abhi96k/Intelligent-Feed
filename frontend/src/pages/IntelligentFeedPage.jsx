@@ -70,16 +70,43 @@ function IntelligentFeedPage({ triggeredAlerts, feeds, onViewDetails, onFetchFee
 
   const getTrendData = (results) => {
     if (!results?.charts) return null;
-    const lineChart = results.charts.find((c) => c.data);
-    if (lineChart) {
-      return {
-        metric_name: results.metric || 'Metric',
-        time_series: lineChart.data,
-        trend_direction: results.evidence?.detection?.change_direction || 'stable',
-        percent_change: results.evidence?.detection?.percent_change || 0,
-      };
+    
+    // Find line chart - data can be in .data or .series[0].data
+    const lineChart = results.charts.find((c) => c.chart_type === 'line');
+    if (!lineChart) return null;
+    
+    // Get the time series data from series[0].data or directly from .data
+    const timeSeriesData = lineChart.series?.[0]?.data || lineChart.data || [];
+    
+    if (timeSeriesData.length === 0) return null;
+    
+    // Extract anomaly points from annotations or detection result
+    let anomalies = [];
+    
+    // Check for anomaly annotations in the chart
+    if (lineChart.annotations) {
+      const anomalyAnnotation = lineChart.annotations.find(a => a.type === 'anomaly');
+      if (anomalyAnnotation?.points) {
+        anomalies = anomalyAnnotation.points;
+      }
     }
-    return null;
+    
+    // Fallback: check detection result for anomaly_points
+    if (anomalies.length === 0 && results.evidence?.detection?.anomaly_points) {
+      anomalies = results.evidence.detection.anomaly_points.map(p => ({
+        date: p.date,
+        value: p.value,
+        severity: p.severity,
+      }));
+    }
+
+    return {
+      metric_name: results.metric || 'Metric',
+      time_series: timeSeriesData,
+      trend_direction: results.evidence?.detection?.change_direction || 'stable',
+      percent_change: results.evidence?.detection?.percent_change || 0,
+      anomalies: anomalies,
+    };
   };
 
   const getDriverData = (results) => {
